@@ -1,6 +1,7 @@
 # Vesc test firmware with field weakening support
 
 This fork adds field weakening for SPM motors (not MTPA for IPM motors) based on a constant voltage constant power strategy described here. https://au.mathworks.com/help/mcb/ref/mtpacontrolreference.html
+Field weakening current is calculated using only motor inductances, speed and flux linkage. No PI loops.
 
 This will allow the motor to spin quite a bit faster than normal. 
 If the throttle is released suddenly at high speed, field weakening current is maintained until a safe speed is reached. However, manually pushing the motor until bemf is equivalent to supply voltage will not trigger field weakening unless the throttle or brake is used.
