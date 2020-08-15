@@ -101,6 +101,7 @@ uint16_t utils_median_filter_uint16_run(uint16_t *buffer,
 #define SIN_30_DEG				(0.5)
 #define COS_MINUS_30_DEG		(0.86602540378)
 #define SIN_MINUS_30_DEG		(-0.5)
+#define ONE_BY_SQRT2            (0.707106781)
 
 // Tables
 extern const float utils_tab_sin_32_1[];
