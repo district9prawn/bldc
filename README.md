@@ -13,7 +13,7 @@ Compile the firmware for your hardware. At the time of writing, the latest devel
 
 For initial testing, I highly recommend running off a current limited power supply limited to a modest current.
 
-I've set the firmware to use the Lq Ld diff value to enable field weakening. If the value is zero, field weakening is disabled. In vesc tool terminal, you can use measure_ind 0.1 to get the Lq Ld diff. Unfortunately, the inductance value vesc tool detects and uses does not work well for field weakening and needs to be adjusted with the gear ratio paramter. The Lq Ld diff value seems to work well enough so this can be entered into vesc tool. If you use the measured inductance value as is (gear ratio = 1), field weakening will be way too aggressive. Start with a higher gear ratio of 6 (calculate fw with 6x higher inductance value), and the field weakening will be weaker. Play around with this ratio and tabulate the resulting erpm at 95% duty and various d axis currents (use real time plots in vesc tool). 
+I've set the firmware to use the Lq Ld diff value to enable field weakening. If the value is zero, field weakening is disabled. In vesc tool terminal, you can use measure_ind 0.1 to get the Lq Ld diff. Unfortunately, the inductance value vesc tool detects and uses does not work well for field weakening and needs to be adjusted with the gear ratio paramter. The Lq Ld diff value seems to work well enough so this can be entered into vesc tool. If you use the measured inductance value as is (gear ratio = 1), field weakening will be way too aggressive. Start with a higher gear ratio of 6 (calculate fw with 6x higher inductance value), and the field weakening will be weaker. I do not recommend setting the inductance value itself to 4x what is measured as this will seriously mess with motor tracking. Play around with this ratio and tabulate the resulting erpm at 95% duty and various d axis currents (use real time plots in vesc tool). 
 
 I recommend plotting your experimentally obtained field weakening curve against calculated field weakening currents to help find the correct ratio. The formula used is:
 Id = (wbase - w) * lambda / (w * Ld)
@@ -21,8 +21,11 @@ Where wbase is the unloaded speed of your motor with no field weakening, w is yo
 For my 6374 149kv with a "ratio" of 1, the curve looks like this. The calculated curve in orange is way too much. 
 ![alt text](https://i.imgur.com/4OCBX4E.png)
 
-The correct ratio is 4.5x
+My correct ratio is 4.5x
 ![alt text](https://i.imgur.com/o1oT06Y.png)
+
+With correct settings, my field weakening region looks something like this under load. 
+![alt text](https://i.imgur.com/bDgoqkX.png)
 
 At the moment fw current is hard limited to 70 % of max motor current. Since fw current is based on speed, fw currents can be limited using erpm limits. On that note, I highly recommend settings sane erpm limits for safety. 
 
