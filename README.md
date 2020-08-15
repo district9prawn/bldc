@@ -27,7 +27,7 @@ My correct ratio is 4.5x
 With correct settings, my field weakening region looks something like this under load. 
 ![alt text](https://i.imgur.com/bDgoqkX.png)
 
-At the moment fw current is hard limited to 70 % of max motor current. Since fw current is based on speed, fw currents can be limited using erpm limits. On that note, I highly recommend settings sane erpm limits for safety. 
+At the moment fw current is hard limited to 70 % of max motor current. Since fw current is based on speed, fw currents can be limited using erpm limits. On that note, I highly recommend settings sane erpm limit for safety. 
 
 ### License
 
