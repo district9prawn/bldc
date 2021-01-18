@@ -176,7 +176,7 @@ static volatile motor_all_state_t m_motor_1;
 static volatile motor_all_state_t m_motor_2;
 #endif
 static volatile int m_isr_motor = 0;
-static float id_inc = 0.00003; // How much field weakening current in pu to increment or decrement each control loop
+static float id_inc = 0.00010; // How much field weakening current in pu to increment or decrement each control loop
 							     // Needs to be a bit faster since the PI loops slow things down
 static float  id_fw = 0;
 static float duty_ref = 0.9;
@@ -2570,7 +2570,7 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 
 		if (motor_now->m_control_mode == CONTROL_MODE_RAMP_DOWN_FW) {
 			iq_set_tmp = 0.0;
-			if (fabsf(duty_now) >= 0.6 * duty_ref) {
+			if (fabsf(duty_now) < 0.6 * duty_ref) {
 				id_fw = 0.0;
 				motor_now->m_control_mode = CONTROL_MODE_NONE;
 				motor_now->m_state = MC_STATE_OFF;
