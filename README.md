@@ -11,7 +11,7 @@ At the moment, this should only be used in current mode, not in duty or speed mo
 ## Setup
 I've set the firmware to use the Lq Ld diff value to enable field weakening. If the value is zero, field weakening is disabled. I've set the "gear ratio" parameter to set the maximum field weakening current relative to the maximum phase current. So if the maximum phase current is set to 100A, setting gear ratio to 0.5 will give at most -50A of field weakening current.
 
-![alt text](https://imgur.com/mCgpp1r)
+![alt text](https://i.imgur.com/mCgpp1r.png)
 
 For safety, I highly recommend setting erpm limits so the stator voltage cannot exceed the battery voltage and cause loss of control or hardware damage!
 
