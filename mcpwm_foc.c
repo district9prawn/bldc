@@ -176,6 +176,10 @@ static volatile motor_all_state_t m_motor_1;
 static volatile motor_all_state_t m_motor_2;
 #endif
 static volatile int m_isr_motor = 0;
+static float id_inc = 0.00003; // How much field weakening current in pu to increment or decrement each control loop
+							     // Needs to be a bit faster since the PI loops slow things down
+static float  id_fw = 0;
+static float duty_ref = 0.9;
 
 // Private functions
 static void do_dc_cal(void);
@@ -850,10 +854,27 @@ void mcpwm_foc_set_pid_pos(float pos) {
  */
 void mcpwm_foc_set_current(float current) {
 	if (fabsf(current) < motor_now()->m_conf->cc_min_current) {
-		motor_now()->m_control_mode = CONTROL_MODE_NONE;
-		motor_now()->m_state = MC_STATE_OFF;
-		stop_pwm_hw(motor_now());
-		return;
+		if (motor_now()->m_control_mode == CONTROL_MODE_RAMP_DOWN_FW) {
+			// Let the ramp down continue
+			return;
+		}
+		// Check if the motor speed is safe
+		float wmax = ONE_BY_SQRT3 * motor_now()->m_motor_state.v_bus / motor_now()->m_conf->foc_motor_flux_linkage;
+		if (fabsf(motor_now()->m_speed_est_fast) > (0.8 * wmax)) {
+			// Keep the inverter running so Id is being applied
+			motor_now()->m_control_mode = CONTROL_MODE_RAMP_DOWN_FW;
+			motor_now()->m_iq_set = 0.0;
+			if (motor_now()->m_state != MC_STATE_RUNNING) {
+				motor_now()->m_state = MC_STATE_RUNNING;
+			}
+			return;
+		} else {
+			id_fw = 0.0; // Reset so that if the motor is immediately restarted id is zero. 
+			motor_now()->m_control_mode = CONTROL_MODE_NONE;
+			motor_now()->m_state = MC_STATE_OFF;
+			stop_pwm_hw(motor_now());
+			return;
+		}
 	}
 
 	motor_now()->m_control_mode = CONTROL_MODE_CURRENT;
@@ -2517,21 +2538,66 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 		}
 
 		// Apply MTPA. See: https://github.com/vedderb/bldc/pull/179
-		const float ld_lq_diff = conf_now->foc_motor_ld_lq_diff;
-		if (ld_lq_diff != 0.0) {
-			const float lambda = conf_now->foc_motor_flux_linkage;
+		// Disable MTPA
+		// const float ld_lq_diff = conf_now->foc_motor_ld_lq_diff;
+		// if (ld_lq_diff != 0.0) {
+		// 	const float lambda = conf_now->foc_motor_flux_linkage;
 
-			id_set_tmp = (lambda - sqrtf(SQ(lambda) + 8.0 * SQ(ld_lq_diff) * SQ(iq_set_tmp))) / (4.0 * ld_lq_diff);
-			iq_set_tmp = SIGN(iq_set_tmp) * sqrtf(SQ(iq_set_tmp) - SQ(id_set_tmp));
+		// 	id_set_tmp = (lambda - sqrtf(SQ(lambda) + 8.0 * SQ(ld_lq_diff) * SQ(iq_set_tmp))) / (4.0 * ld_lq_diff);
+		// 	iq_set_tmp = SIGN(iq_set_tmp) * sqrtf(SQ(iq_set_tmp) - SQ(id_set_tmp));
+		// }
+
+		// Simple control loop to apply field weakening
+		float id_max = motor_now->m_conf->si_gear_ratio * conf_now->lo_current_max; // Use gear ratio parameter to set id limit
+		const float diff = motor_now->m_conf->foc_motor_ld_lq_diff;
+		float duty_now = motor_now->m_motor_state.duty_now;
+		
+		if (diff != 0.0) {
+			if (fabsf(duty_now) >= duty_ref) {
+				// Do field weakening
+				id_fw -= id_inc;
+			} else {
+				id_fw += 0.25 * id_inc; // Slow down the id decay so field weakening kicks in a bit more reliably
+			}
+			id_set_tmp = id_fw * id_max;
+			// Truncate Id if too much field weakening			
+			utils_truncate_number(&id_set_tmp, -1.0*id_max, 0.0);
+			// If current vector is saturated, only truncate Iq. Maintain Id for safety
+			if (sqrtf(SQ(id_set_tmp) + SQ(iq_set_tmp)) >= conf_now->lo_current_max) {
+				iq_set_tmp = SIGN(iq_set_tmp) * sqrtf(SQ(conf_now->lo_current_max) - SQ(id_set_tmp));
+			}
 		}
 
+		if (motor_now->m_control_mode == CONTROL_MODE_RAMP_DOWN_FW) {
+			iq_set_tmp = 0.0;
+			if (fabsf(duty_now) >= 0.6 * duty_ref) {
+				id_fw = 0.0;
+				motor_now->m_control_mode = CONTROL_MODE_NONE;
+				motor_now->m_state = MC_STATE_OFF;
+				stop_pwm_hw(motor_now);
+				return;
+			}
+		}
+
+		// id_set_tmp = -5.0; // Override id for testing
+
 		// Apply current limits
-		// TODO: Consider D axis current for the input current as well.
 		const float mod_q = motor_now->m_motor_state.mod_q;
+		const float mod_d = motor_now->m_motor_state.mod_d;
+		if ((motor_now->m_motor_state.id < -3.0) && (diff != 0.0)) {
+			// Field weakening is in effect. Include D axis current when applying current-in limiting
+			if (mod_q > 0.001) {
+				utils_truncate_number(&iq_set_tmp, conf_now->lo_in_current_min / mod_q, (conf_now->lo_in_current_max / mod_q) - motor_now->m_motor_state.id * fabsf(mod_d));
+			} else if (mod_q < -0.001) {
+				utils_truncate_number(&iq_set_tmp, (conf_now->lo_in_current_max / mod_q) + motor_now->m_motor_state.id * fabsf(mod_d), conf_now->lo_in_current_min / mod_q);
+			}
+		} else {
+		// Ignore D axis for current limiting. 
 		if (mod_q > 0.001) {
 			utils_truncate_number(&iq_set_tmp, conf_now->lo_in_current_min / mod_q, conf_now->lo_in_current_max / mod_q);
 		} else if (mod_q < -0.001) {
 			utils_truncate_number(&iq_set_tmp, conf_now->lo_in_current_max / mod_q, conf_now->lo_in_current_min / mod_q);
+			}
 		}
 
 		if (mod_q > 0.0) {
@@ -3336,7 +3402,7 @@ static void control_current(volatile motor_all_state_t *motor, float dt) {
 	float dec_vq = 0.0;
 	float dec_bemf = 0.0;
 
-	if (motor->m_control_mode < CONTROL_MODE_HANDBRAKE && conf_now->foc_cc_decoupling != FOC_CC_DECOUPLING_DISABLED) {
+	if ((motor->m_control_mode == CONTROL_MODE_RAMP_DOWN_FW || motor->m_control_mode < CONTROL_MODE_HANDBRAKE) && conf_now->foc_cc_decoupling != FOC_CC_DECOUPLING_DISABLED) {
 		switch (conf_now->foc_cc_decoupling) {
 		case FOC_CC_DECOUPLING_CROSS:
 			dec_vd = state_m->iq * state_m->speed_rad_s * conf_now->foc_motor_l * (3.0 / 2.0);
@@ -3345,12 +3411,20 @@ static void control_current(volatile motor_all_state_t *motor, float dt) {
 
 		case FOC_CC_DECOUPLING_BEMF:
 			dec_bemf = state_m->speed_rad_s * conf_now->foc_motor_flux_linkage;
+			// Truncate bemf if field weakening
+			if (fabsf(dec_bemf) > (ONE_BY_SQRT3 * state_m->v_bus)) {
+				dec_bemf = SIGN(dec_bemf) * ONE_BY_SQRT3 * state_m->v_bus;
+			}
 			break;
 
 		case FOC_CC_DECOUPLING_CROSS_BEMF:
 			dec_vd = state_m->iq * state_m->speed_rad_s * conf_now->foc_motor_l * (3.0 / 2.0);
 			dec_vq = state_m->id * state_m->speed_rad_s * conf_now->foc_motor_l * (3.0 / 2.0);
 			dec_bemf = state_m->speed_rad_s * conf_now->foc_motor_flux_linkage;
+			// Truncate bemf if field weakening
+			if (fabsf(dec_bemf) > (ONE_BY_SQRT3 * state_m->v_bus)) {
+				dec_bemf = SIGN(dec_bemf) * ONE_BY_SQRT3 * state_m->v_bus;
+			}
 			break;
 
 		default:
